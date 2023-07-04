@@ -1,0 +1,147 @@
+ubuntu@ip-172-31-22-90:~/terraform$ vi vpc.tf 
+
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+
+  name = "my-vpc2"
+  cidr = "10.0.0.0/16"
+
+  azs             = ["us-east-1a", "us-east-1b"]
+  private_subnets = ["10.0.11.0/24", "10.0.12.0/24"]
+  public_subnets  = ["10.0.111.0/24", "10.0.112.0/24"]
+
+  enable_nat_gateway = true
+  enable_vpn_gateway = true
+
+  tags = {
+    Terraform = "true"
+    Environment = "dev"
+  }
+}
+
+
+
+ubuntu@ip-172-31-22-90:~/terraform$ vi ec2.tf 
+
+resource "aws_key_pair" "bashdeployer" {
+  key_name   = "deployer-key"
+  public_key = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQDbBHYKFC+wJSta85rU7ezaJ4PjxZPkvLu1xmz/lXv1jAuZUgTJZnxphh1GpwrsR+NdI/5cw2ZIBLwlPYuGK9d0wFfYzPD2yYvOLZoiOYi68GLE/4bUEduZCBaXdmX/KoZTsnpRm7uXcpkDxKMJaEB8tW9I+H14Sg0ZLorTcX2UGZq0yCGRqTR1y58Gdd9AbezZmfuf4FljoWjGOJMUHixbuSlaoj3TA8nAAnEhWvKQaSyEnYEHXw4OKMPr/ixWBwQFy8DV9ualE4zdaj45hvSZGzj38bxQPO5mf8KR5W10px3FNuoRG39rbUTP4vWFFAM6sV0MEAdrhBGOvNQ8eqiChRf461CrIMSHWvY1Tst9u3FW31Hq1AZY+i6y9dIdvOio0AvyUEnOBM5xJ8SWqJP24wv/yOdLawyh4udRsR+h4E6EySbZil1XgGEZdQ9Gf//dV5Gbau6EWGyuqpg2TM7Va3zhJ1oBP9Ayz51baxmd3CJx3S5YBoI3Yc4qGMSX/CM= ubuntu@ip-172-31-22-90"
+}
+
+resource "aws_instance" "bastionhost" {
+
+  ami                         = "ami-053b0d53c279acc90"
+  instance_type               = "t2.medium"
+  availability_zone           = "us-east-1a"
+  key_name                    = aws_key_pair.bashdeployer.id
+  vpc_security_group_ids      = ["sg-08c4c2438c4f7eeb5"]
+  subnet_id                   = "subnet-0c560300b40549a40"
+  associate_public_ip_address = true
+  tags = {
+    Name = "bastion_host"
+  }
+}
+
+resource "aws_instance" "jenkinshost" {
+
+  ami           = "ami-053b0d53c279acc90"
+  instance_type = "t2.medium"
+  availability_zone           = "us-east-1a"
+  key_name                    = aws_key_pair.bashdeployer.id
+  subnet_id = "subnet-029841f3a94746f13"
+  vpc_security_group_ids = ["sg-0c3b5aae7531b7d78"]
+  associate_public_ip_address = true
+  tags = {
+    Name = "jenkins_host"
+  }
+}
+
+resource "aws_instance" "apphost" {
+
+  ami           = "ami-053b0d53c279acc90"
+  instance_type = "t2.medium"
+  availability_zone           = "us-east-1b"
+  key_name                    = aws_key_pair.bashdeployer.id
+  subnet_id = "subnet-0724a24e396e3b4e0"
+  vpc_security_group_ids = ["sg-0c3b5aae7531b7d78"]
+  associate_public_ip_address = true
+  tags = {
+    Name = "app_host"
+  }
+}
+
+ubuntu@ip-172-31-22-90:~/terraform$ vi jenappsg.tf
+
+module "jenapp_sg" {
+  source = "terraform-aws-modules/security-group/aws"
+
+  name        = "ssh-service"
+  description = "Security group for user-service with custom ports open within VPC"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress_with_cidr_blocks = [
+
+    {
+      from_port   = 0
+      to_port     = 65535
+      protocol    = "tcp"
+      description = "User-service ports"
+      cidr_blocks = "0.0.0.0/0"
+    }
+  ]
+  egress_rules = ["all-all"]
+  egress_cidr_blocks = ["10.0.0.0/16"]
+
+tags = {
+    Name = "jenapp_sg"
+  }
+}
+
+ubuntu@ip-172-31-22-90:~/terraform$ vi bashsg.tf 
+
+module "bash_sg" {
+  source = "terraform-aws-modules/security-group/aws"
+
+  name        = "ssh-service"
+  description = "Security group for user-service with custom ports open within VPC"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress_with_cidr_blocks = [
+
+    {
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      description = "User-service ports"
+      cidr_blocks = "0.0.0.0/0"
+    }
+  ]
+  egress_rules = ["all-all"]
+  egress_cidr_blocks = ["0.0.0.0/0"]
+
+tags = {
+    Name = "bash_sg"
+  }
+}
+
+ubuntu@ip-172-31-22-90:~/terraform$ vi provider.tf 
+
+terraform {
+  required_providers {
+    aws = {
+      source = "hashicorp/aws"
+      version = "5.5.0"
+    }
+  }
+
+backend "s3" {
+    bucket = "testbucket886121"
+    key    = "terraform.tfstate"
+    region = "us-east-1"
+  }
+
+}
+
+provider "aws" {
+   region = "us-east-1"
+}
